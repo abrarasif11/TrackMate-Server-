@@ -79,10 +79,36 @@ async function run() {
       }
     });
 
+    // DELETE a parcel by ID
+    app.delete("/parcels/:id", async (req, res) => {
+      const { id } = req.params;
+
+      try {
+        // Convert string ID to ObjectId
+        const parcelObjectId = new ObjectId(id);
+
+        // Find parcel
+        const parcel = await parcelCollection.findOne({ _id: parcelObjectId });
+        if (!parcel) {
+          return res.status(404).json({ message: "Parcel not found" });
+        }
+
+        // Delete parcel
+        await parcelCollection.deleteOne({ _id: parcelObjectId });
+
+        res.status(200).json({ message: "Parcel deleted successfully" });
+      } catch (error) {
+        console.error("Error deleting parcel:", error);
+        res
+          .status(500)
+          .json({ message: "Internal server error", error: error.message });
+      }
+    });
+
     // Connect the client to the server
     await client.connect();
     await client.db("admin").command({ ping: 1 });
-    console.log("✅ MongoDB Connected Successfully!");
+    console.log(" MongoDB Connected Successfully!");
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
