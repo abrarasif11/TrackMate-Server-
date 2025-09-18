@@ -158,6 +158,38 @@ async function run() {
       }
     });
 
+
+
+   // POST /tracking -> add a new tracking update
+app.post("/tracking", async (req, res) => {
+  try {
+    const { parcelId, trackingId, status, location } = req.body;
+
+    if (!parcelId || !trackingId || !status) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const trackingData = {
+      parcelId: new ObjectId(parcelId),
+      trackingId,
+      status,
+      location: location || "Unknown",
+      updatedAt: new Date(),
+    };
+
+    const result = await trackingCollection.insertOne(trackingData);
+
+    res.status(201).json({
+      success: true,
+      message: "Tracking update added",
+      data: { ...trackingData, _id: result.insertedId },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+
     //  Create Stripe Payment Intent
     app.post("/create-payment-intent", async (req, res) => {
       try {
