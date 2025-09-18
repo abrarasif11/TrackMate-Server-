@@ -145,6 +145,76 @@ async function run() {
       }
     });
 
+    // Confirm payment & update parcel
+    app.post("/confirm-payment", async (req, res) => {
+      try {
+        const { parcelId, paymentIntentId, amount, createdBy } = req.body;
+
+        if (!ObjectId.isValid(parcelId)) {
+          return res
+            .status(400)
+            .json({ success: false, message: "Invalid Parcel ID" });
+        }
+
+        //  Update parcel status
+        const updateResult = await parcelCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          { $set: { status: "Paid", paymentIntentId } }
+        );
+
+        if (updateResult.matchedCount === 0) {
+          return res
+            .status(404)
+            .json({ success: false, message: "Parcel not found" });
+        }
+
+        // Save payment history
+        const paymentData = {
+          parcelId: new ObjectId(parcelId), // store parcel reference
+          createdBy, // user email
+          amount, // amount in cents
+          paymentIntentId, // Stripe payment intent ID
+          status: "Succeeded", // hardcoded now, can use Stripe webhook later
+          createdAt: new Date(), // timestamp
+        };
+
+        const insertResult = await paymentCollection.insertOne(paymentData);
+
+        res.json({
+          success: true,
+          message: "Payment confirmed & history saved",
+          data: { ...paymentData, _id: insertResult.insertedId }, // ✅ include payment _id
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    //  payment history (user or admin)
+    app.get("/payments", async (req, res) => {
+      try {
+        const email = req.query.email; // optional query param
+        let query = {};
+
+        if (email) {
+          query = { createdBy: email }; // filter by user
+        }
+
+        const payments = await paymentCollection
+          .find(query)
+          .sort({ createdAt: -1 }) // latest first
+          .toArray();
+
+        res.json({
+          success: true,
+          count: payments.length,
+          data: payments, // includes _id & parcelId
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
     // Create Payment Intent endpoint
     app.post("/create-payment-intent", async (req, res) => {
       const amountInCents = req.body.amountInCents;
