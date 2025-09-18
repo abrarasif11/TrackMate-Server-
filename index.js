@@ -32,6 +32,7 @@ async function run() {
     //DB Collections //
     const db = client.db("parcelDB");
     const parcelCollection = db.collection("parcel");
+    const paymentCollection = db.collection("payments");
 
     //  GET all parcels
     app.get("/parcels", async (req, res) => {
@@ -176,6 +177,8 @@ async function run() {
           paymentIntentId, // Stripe payment intent ID
           status: "Succeeded", // hardcoded now, can use Stripe webhook later
           createdAt: new Date(), // timestamp
+          paid_at_string: new Date().toISOString(),
+          paid_at: new Date(),
         };
 
         const insertResult = await paymentCollection.insertOne(paymentData);
@@ -202,7 +205,7 @@ async function run() {
 
         const payments = await paymentCollection
           .find(query)
-          .sort({ createdAt: -1 }) // latest first
+          .sort({ paid_at: -1 }) // latest first
           .toArray();
 
         res.json({
