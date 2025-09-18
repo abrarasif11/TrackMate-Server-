@@ -2,23 +2,17 @@ const express = require("express");
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 5000;
-
-// Load environment variables
 require("dotenv").config();
-
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
 const stripe = require("stripe")(process.env.PAYMENT_GATEWAY_KEY);
 
 // Middleware
-
 app.use(cors());
 app.use(express.json());
 
-//Mongo Code //
+// MongoDB Connection
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.vhdpi0m.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -29,230 +23,173 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    //DB Collections //
     const db = client.db("parcelDB");
     const parcelCollection = db.collection("parcel");
     const paymentCollection = db.collection("payments");
 
-    //  GET all parcels
-    app.get("/parcels", async (req, res) => {
-      const parcels = await parcelCollection.find().toArray();
-      res.send(parcels);
-    });
-
-    // GET all parcels OR filter by createdBy email
+    //GET all parcels (optionally filter by email)
     app.get("/parcels", async (req, res) => {
       try {
-        const email = req.query.email; // optional query parameter
+        const email = req.query.email;
         let query = {};
-
-        if (email) {
-          query = { createdBy: email }; // filter by email if provided
-        }
+        if (email) query = { createdBy: email };
 
         const parcels = await parcelCollection
           .find(query)
-          .sort({ createdAt: -1 }) // latest first
+          .sort({ createdAt: -1 })
           .toArray();
 
-        res.json({
-          success: true,
-          count: parcels.length,
-          data: parcels,
-        });
+        res.json(parcels); // return raw array
       } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ error: error.message });
       }
     });
 
-    //  GET single parcel by MongoDB _id
+    //  GET single parcel by _id
     app.get("/parcels/:id", async (req, res) => {
       try {
         const id = req.params.id;
-
-        // Validate ObjectId
         if (!ObjectId.isValid(id)) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid parcel ID",
-          });
+          return res.status(400).json({ message: "Invalid parcel ID" });
         }
 
-        // Find parcel by _id
         const parcel = await parcelCollection.findOne({
           _id: new ObjectId(id),
         });
 
         if (!parcel) {
-          return res.status(404).json({
-            success: false,
-            message: "Parcel not found",
-          });
-        }
-
-        res.json({
-          success: true,
-          data: parcel,
-        });
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
-    //  POST API -> Add new parcel
-    app.post("/parcels", async (req, res) => {
-      try {
-        const parcelData = req.body;
-
-        // Add default fields
-        parcelData.status = "Pending";
-        parcelData.trackingId = new ObjectId().toString(); // unique tracking id
-        parcelData.createdAt = new Date();
-
-        const result = await parcelCollection.insertOne(parcelData); // ✅ fixed collection name
-        res.status(201).json({
-          success: true,
-          message: "Parcel created successfully!",
-          data: { ...parcelData, _id: result.insertedId },
-        });
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
-    // DELETE a parcel by ID
-    app.delete("/parcels/:id", async (req, res) => {
-      const { id } = req.params;
-
-      try {
-        // Convert string ID to ObjectId
-        const parcelObjectId = new ObjectId(id);
-
-        // Find parcel
-        const parcel = await parcelCollection.findOne({ _id: parcelObjectId });
-        if (!parcel) {
           return res.status(404).json({ message: "Parcel not found" });
         }
 
-        // Delete parcel
-        await parcelCollection.deleteOne({ _id: parcelObjectId });
-
-        res.status(200).json({ message: "Parcel deleted successfully" });
+        res.json(parcel); // return raw parcel object
       } catch (error) {
-        console.error("Error deleting parcel:", error);
-        res
-          .status(500)
-          .json({ message: "Internal server error", error: error.message });
+        res.status(500).json({ error: error.message });
       }
     });
 
-    // Confirm payment & update parcel
+    //  POST new parcel
+    app.post("/parcels", async (req, res) => {
+      try {
+        const parcelData = req.body;
+        parcelData.status = "Pending";
+        parcelData.trackingId = new ObjectId().toString();
+        parcelData.createdAt = new Date();
+
+        const result = await parcelCollection.insertOne(parcelData);
+        res.status(201).json({ ...parcelData, _id: result.insertedId });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    //  DELETE parcel by ID
+    app.delete("/parcels/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid parcel ID" });
+        }
+
+        const result = await parcelCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Parcel not found" });
+        }
+
+        res.json({ message: "Parcel deleted successfully" });
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    //  Confirm payment & update parcel
     app.post("/confirm-payment", async (req, res) => {
       try {
         const { parcelId, paymentIntentId, amount, createdBy } = req.body;
 
         if (!ObjectId.isValid(parcelId)) {
-          return res
-            .status(400)
-            .json({ success: false, message: "Invalid Parcel ID" });
+          return res.status(400).json({ message: "Invalid Parcel ID" });
         }
 
-        //  Update parcel status
         const updateResult = await parcelCollection.updateOne(
           { _id: new ObjectId(parcelId) },
           { $set: { status: "Paid", paymentIntentId } }
         );
 
         if (updateResult.matchedCount === 0) {
-          return res
-            .status(404)
-            .json({ success: false, message: "Parcel not found" });
+          return res.status(404).json({ message: "Parcel not found" });
         }
 
-        // Save payment history
         const paymentData = {
-          parcelId: new ObjectId(parcelId), // store parcel reference
-          createdBy, // user email
-          amount, // amount in cents
-          paymentIntentId, // Stripe payment intent ID
-          status: "Succeeded", // hardcoded now, can use Stripe webhook later
-          createdAt: new Date(), // timestamp
-          paid_at_string: new Date().toISOString(),
+          parcelId: new ObjectId(parcelId),
+          createdBy,
+          amount,
+          paymentIntentId,
+          status: "Succeeded",
+          createdAt: new Date(),
           paid_at: new Date(),
         };
 
         const insertResult = await paymentCollection.insertOne(paymentData);
 
-        res.json({
-          success: true,
-          message: "Payment confirmed & history saved",
-          data: { ...paymentData, _id: insertResult.insertedId }, // ✅ include payment _id
-        });
+        res.json({ ...paymentData, _id: insertResult.insertedId });
       } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ error: error.message });
       }
     });
 
-    //  payment history (user or admin)
+    //  GET payment history (optionally filter by email)
     app.get("/payments", async (req, res) => {
       try {
-        const email = req.query.email; // optional query param
+        const email = req.query.email;
         let query = {};
-
-        if (email) {
-          query = { createdBy: email }; // filter by user
-        }
+        if (email) query = { createdBy: email };
 
         const payments = await paymentCollection
           .find(query)
-          .sort({ paid_at: -1 }) // latest first
+          .sort({ paid_at: -1 })
           .toArray();
 
-        res.json({
-          success: true,
-          count: payments.length,
-          data: payments, // includes _id & parcelId
-        });
+        res.json(payments); // return raw array
       } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        res.status(500).json({ error: error.message });
       }
     });
 
-    // Create Payment Intent endpoint
+    //  Create Stripe Payment Intent
     app.post("/create-payment-intent", async (req, res) => {
-      const amountInCents = req.body.amountInCents;
       try {
+        const { amountInCents } = req.body;
         const paymentIntent = await stripe.paymentIntents.create({
           amount: amountInCents,
           currency: "usd",
           payment_method_types: ["card"],
         });
 
-        res.json({
-          clientSecret: paymentIntent.client_secret,
-        });
+        res.json({ clientSecret: paymentIntent.client_secret });
       } catch (error) {
         res.status(500).json({ error: error.message });
       }
     });
 
-    // Connect the client to the server
+    // Connect MongoDB
     await client.connect();
     await client.db("admin").command({ ping: 1 });
-    console.log(" MongoDB Connected Successfully!");
+    console.log("✅ MongoDB Connected Successfully!");
   } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
+    // leave client open
   }
 }
 run().catch(console.dir);
 
-// sample route
+// Root Route
 app.get("/", (req, res) => {
   res.send("TrackMate server is tracking....");
 });
 
-// server running
+// Start Server
 app.listen(port, () => {
   console.log(`🚀 TrackMate Server running on PORT: ${port}`);
 });
