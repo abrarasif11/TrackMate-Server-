@@ -24,8 +24,23 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     const db = client.db("parcelDB");
+    const usersCollection = db.collection("users");
     const parcelCollection = db.collection("parcel");
     const paymentCollection = db.collection("payments");
+
+    // post users
+    app.post("/users", async (req, res) => {
+      const email = req.body.email;
+      const userExists = await usersCollection.findOne({ email });
+      if (userExists) {
+        return res
+          .status(200)
+          .send({ message: "User Already Exist", inserted: false });
+      }
+      const user = req.body;
+      const result = await usersCollection.insertOne(user);
+      res.send(result)
+    });
 
     //GET all parcels (optionally filter by email)
     app.get("/parcels", async (req, res) => {
@@ -158,37 +173,36 @@ async function run() {
       }
     });
 
+    // POST /tracking -> add a new tracking update
+    app.post("/tracking", async (req, res) => {
+      try {
+        const { parcelId, trackingId, status, location } = req.body;
 
+        if (!parcelId || !trackingId || !status) {
+          return res
+            .status(400)
+            .json({ success: false, message: "Missing required fields" });
+        }
 
-   // POST /tracking -> add a new tracking update
-app.post("/tracking", async (req, res) => {
-  try {
-    const { parcelId, trackingId, status, location } = req.body;
+        const trackingData = {
+          parcelId: new ObjectId(parcelId),
+          trackingId,
+          status,
+          location: location || "Unknown",
+          updatedAt: new Date(),
+        };
 
-    if (!parcelId || !trackingId || !status) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
-    }
+        const result = await trackingCollection.insertOne(trackingData);
 
-    const trackingData = {
-      parcelId: new ObjectId(parcelId),
-      trackingId,
-      status,
-      location: location || "Unknown",
-      updatedAt: new Date(),
-    };
-
-    const result = await trackingCollection.insertOne(trackingData);
-
-    res.status(201).json({
-      success: true,
-      message: "Tracking update added",
-      data: { ...trackingData, _id: result.insertedId },
+        res.status(201).json({
+          success: true,
+          message: "Tracking update added",
+          data: { ...trackingData, _id: result.insertedId },
+        });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
     });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 
     //  Create Stripe Payment Intent
     app.post("/create-payment-intent", async (req, res) => {
